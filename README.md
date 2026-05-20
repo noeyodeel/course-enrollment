@@ -143,14 +143,15 @@ position = 나보다 먼저 대기열에 들어온 WAITING 사용자 수 + 1
 
 ## AI 활용 범위
 
-ChatGPT Codex를 사용해 다음 작업을 보조받았습니다.
+ChatGPT Codex를 개발 보조 도구로 사용했습니다.
 
-- Spring Boot 프로젝트 구조 설계
-- JPA 엔티티, Repository, Service, Controller 작성
-- MySQL 및 Docker Compose 실행 설정
-- 대기열 waiting room 방식 설계
-- 테스트 코드 작성
-- README 문서 작성
+- 요구사항 분석 및 구현 범위 정리
+- 대기열 waiting room 방식 설계 검토
+- Spring Boot/JPA 코드 작성 및 리팩터링 보조
+- 테스트 케이스 보강 아이디어 정리
+- README와 API 문서 초안 작성 보조
+
+최종 코드는 직접 검토하고 실행 결과를 확인했습니다.
 
 ## API 목록 및 예시
 
