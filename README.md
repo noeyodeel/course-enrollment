@@ -60,6 +60,12 @@ mvn spring-boot:run
 http://localhost:8080
 ```
 
+Swagger UI:
+
+```text
+http://localhost:8080/swagger-ui/index.html
+```
+
 MySQL 정보를 바꾸고 싶다면 환경변수를 사용할 수 있습니다.
 
 ```bash
@@ -390,6 +396,14 @@ mvn test
 - `DRAFT` 강의 신청 불가
 - `READY` 대기열 없이 수강 신청 불가
 - 남은 정원만큼만 `READY` 발급
+- 기존 활성 신청 인원을 제외하고 남은 정원만큼만 `READY` 발급
+- `READY` 만료 후 수강 신청 불가
+- `READY` 만료 후 다음 대기자 `READY` 승격
+- 중복 대기열 진입 불가
+- 중복 수강 신청 불가
+- 강의 생성자가 아닌 사용자의 수강생 목록 조회 불가
+- `CLOSED` 강의 대기열 진입 불가
+- 내 수강 신청 목록 페이지네이션
 - 수강 신청 후 결제 확정
 - 결제 확정 후 7일 초과 취소 불가
 - 수강 취소 시 다음 대기자 `READY` 승격

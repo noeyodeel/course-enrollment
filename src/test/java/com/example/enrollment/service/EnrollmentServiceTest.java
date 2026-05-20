@@ -17,12 +17,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +49,11 @@ class EnrollmentServiceTest {
 
     @Autowired
     MutableClock mutableClock;
+
+    @BeforeEach
+    void setUp() {
+        mutableClock.setInstant("2026-05-17T00:00:00Z");
+    }
 
     @Test
     void draftCourseCannotBeEnrolled() {
@@ -144,6 +152,83 @@ class EnrollmentServiceTest {
     }
 
     @Test
+    void expiredReadyQueueCannotEnroll() {
+        // READY 유효 시간이 지나면 해당 사용자는 더 이상 수강 신청을 할 수 없다.
+        Course course = saveOpenCourse(1);
+        enrollmentQueueService.enter(10L, course.getId());
+        mutableClock.setInstant("2026-05-17T00:11:00Z");
+
+        assertThatThrownBy(() -> enrollmentService.enroll(10L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("expired");
+    }
+
+    @Test
+    void expiredReadyQueuePromotesNextWaitingUser() {
+        // READY 사용자가 제한 시간 안에 신청하지 않으면 다음 WAITING 사용자가 READY로 승격된다.
+        Course course = saveOpenCourse(1);
+        enrollmentQueueService.enter(10L, course.getId());
+        EnrollmentQueueResponse waiting = enrollmentQueueService.enter(11L, course.getId());
+
+        assertThat(waiting.status()).isEqualTo(EnrollmentQueueStatus.WAITING);
+
+        mutableClock.setInstant("2026-05-17T00:11:00Z");
+        assertThatThrownBy(() -> enrollmentService.enroll(10L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("expired");
+
+        EnrollmentQueueResponse promoted = enrollmentQueueService.getMine(11L, course.getId());
+
+        assertThat(promoted.status()).isEqualTo(EnrollmentQueueStatus.READY);
+        assertThat(promoted.position()).isZero();
+    }
+
+    @Test
+    void duplicateActiveQueueIsRejected() {
+        // 같은 사용자는 같은 강의에 WAITING 또는 READY 대기열을 중복 생성할 수 없다.
+        Course course = saveOpenCourse(2);
+        enrollmentQueueService.enter(10L, course.getId());
+
+        assertThatThrownBy(() -> enrollmentQueueService.enter(10L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("active queue");
+    }
+
+    @Test
+    void duplicateActiveEnrollmentIsRejected() {
+        // 같은 사용자는 같은 강의에 PENDING 또는 CONFIRMED 신청을 중복 생성할 수 없다.
+        Course course = saveOpenCourse(2);
+        createPendingEnrollment(10L, course.getId());
+
+        assertThatThrownBy(() -> enrollmentQueueService.enter(10L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("active enrollment");
+    }
+
+    @Test
+    void nonCreatorCannotReadCourseEnrollments() {
+        // 강의별 수강생 목록은 해당 강의를 만든 크리에이터만 조회할 수 있다.
+        Course course = saveOpenCourse(1);
+
+        assertThatThrownBy(() -> enrollmentService.courseEnrollments(999L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void closedCourseCannotEnterQueue() {
+        // CLOSED 상태의 강의는 모집 마감 상태이므로 대기열 진입도 막는다.
+        Course course = saveOpenCourse(1);
+        course.changeStatus(CourseStatus.CLOSED);
+
+        assertThatThrownBy(() -> enrollmentQueueService.enter(10L, course.getId()))
+                .isInstanceOf(ApiException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
     void waitingQueueIsPromotedWhenEnrollmentIsCancelled() {
         // 수강 취소로 자리가 생기면 가장 먼저 기다리던 WAITING 사용자를 READY로 승격한다.
         Course course = saveOpenCourse(1);
@@ -158,6 +243,23 @@ class EnrollmentServiceTest {
 
         assertThat(promoted.status()).isEqualTo(EnrollmentQueueStatus.READY);
         assertThat(promoted.position()).isZero();
+    }
+
+    @Test
+    void myEnrollmentsArePaged() {
+        // 내 수강 신청 목록은 Pageable을 적용해 요청한 크기만큼 반환하고 전체 개수를 함께 제공한다.
+        Course firstCourse = saveOpenCourse(1);
+        Course secondCourse = saveOpenCourse(1);
+        Course thirdCourse = saveOpenCourse(1);
+        createPendingEnrollment(10L, firstCourse.getId());
+        createPendingEnrollment(10L, secondCourse.getId());
+        createPendingEnrollment(10L, thirdCourse.getId());
+
+        Page<EnrollmentResponse> page = enrollmentService.myEnrollments(10L, PageRequest.of(0, 2));
+
+        assertThat(page.getContent()).hasSize(2);
+        assertThat(page.getTotalElements()).isEqualTo(3);
+        assertThat(page.getTotalPages()).isEqualTo(2);
     }
 
     private Course saveOpenCourse(int capacity) {
